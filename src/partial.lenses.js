@@ -550,10 +550,7 @@ const getPick = (process.env.NODE_ENV === 'production' ? id : C.res(I.freeze))(
     for (const k in template) {
       const t = template[k]
       const v = I.isObject(t) ? getPick(t, x) : getAsU(id, t, x)
-      if (void 0 !== v) {
-        if (!r) r = {}
-        r[k] = v
-      }
+      if (void 0 !== v) (r ? r : (r = {}))[k] = v
     }
     return r
   }
@@ -589,6 +586,26 @@ const toObject = x => (I.constructorOf(x) !== Object ? I.toObject(x) : x)
 //
 
 const identity = (x, i, _F, xi2yF) => xi2yF(x, i)
+
+//
+
+function fromNested(fromLevel, otherwise, template) {
+  const k2o = I.create(null)
+  for (const k in template) {
+    const v = template[k]
+    k2o[k] = I.isObject(v) ? fromNested(fromLevel, otherwise, v) : toFunction(v)
+  }
+  return fromLevel(otherwise, k2o)
+}
+
+const fromNestedOr = fromLevel =>
+  I.curryN(
+    2,
+    otherwise => (
+      (otherwise = toFunction(otherwise)),
+      template => fromNested(fromLevel, otherwise, template)
+    )
+  )
 
 //
 
@@ -683,14 +700,66 @@ const branchOr1Level = (otherwise, k2o) => (x, _i, A, xi2yA) => {
   }
 }
 
-function branchOrU(otherwise, template) {
-  const k2o = I.create(null)
-  for (const k in template) {
-    const v = template[k]
-    k2o[k] = I.isObject(v) ? branchOrU(otherwise, v) : toFunction(v)
+//
+
+const getAttrs = (process.env.NODE_ENV === 'production'
+  ? I.id
+  : C.res(I.freeze))((otherwise, template, x) => {
+  if (x instanceof Object) {
+    const o = {}
+    for (const k in template) {
+      const v = template[k](x[k], k, Select, I.id)
+      if (void 0 !== v) o[k] = v
+    }
+    if (zero !== otherwise) {
+      x = toObject(x)
+      for (const k in x) {
+        if (void 0 === template[k]) {
+          const v = otherwise(x[k], k, Select, I.id)
+          if (void 0 !== v) o[k] = v
+        }
+      }
+    }
+    return o
   }
-  return branchOr1Level(otherwise, k2o)
-}
+})
+
+const setAttrs = (process.env.NODE_ENV === 'production'
+  ? I.id
+  : C.res(I.freeze))((otherwise, template, y, x) => {
+  let p
+  y = y instanceof Object ? toObject(y) : I.protoless0
+  x = x instanceof Object ? toObject(x) : I.protoless0
+  let k
+  const getY = () => y[k]
+  for (k in template) {
+    const v = template[k](x[k], k, Identity, getY)
+    if (void 0 !== v) (p ? p : (p = {}))[k] = v
+  }
+  for (k in x) {
+    if (void 0 === template[k]) {
+      const v = otherwise(x[k], k, Identity, getY)
+      if (void 0 !== v) (p ? p : (p = {}))[k] = v
+    }
+  }
+  if (zero !== otherwise) {
+    for (k in y) {
+      if (void 0 === template[k] && void 0 === x[k]) {
+        const v = otherwise(void 0, k, Identity, getY)
+        if (void 0 !== v) (p ? p : (p = {}))[k] = v
+      }
+    }
+  }
+  return void 0 !== p ? p : y === I.protoless0 ? void 0 : I.object0
+})
+
+const attrsOr1Level = (otherwise, template) => (x, i, F, xi2yF) =>
+  F.map(
+    y => setAttrs(otherwise, template, y, x),
+    xi2yF(getAttrs(otherwise, template, x), i)
+  )
+
+//
 
 const replaced = (inn, out, x) => (I.acyclicEqualsU(x, inn) ? out : x)
 
@@ -1212,14 +1281,7 @@ export const removeOp = setOp()
 
 export const branchOr = (process.env.NODE_ENV === 'production'
   ? id
-  : C.par(1, C.ef(reqTemplate('branchOr'))))(
-  I.curryN(2, function branchOr(otherwise) {
-    otherwise = toFunction(otherwise)
-    return function branchOr(template) {
-      return branchOrU(otherwise, template)
-    }
-  })
-)
+  : C.par(1, C.ef(reqTemplate('branchOr'))))(fromNestedOr(branchOr1Level))
 
 export const branch = branchOr(zero)
 
@@ -1709,8 +1771,32 @@ export const suffix = n => slice(0 === n ? Infinity : !n ? 0 : -n, void 0)
 
 // Lensing objects
 
-export const pickIn = t =>
-  I.isObject(t) ? pick(modify(values, pickInAux, t)) : t
+export const attrsInOr = (process.env.NODE_ENV === 'production'
+  ? I.id
+  : C.par(1, C.ef(reqTemplate('attrsOr'))))(fromNestedOr(attrsOr1Level))
+
+export const attrsIn = attrsInOr(zero)
+
+export function attrs() {
+  const n = arguments.length
+  const template = {}
+  for (let i = 0; i < n; ++i) template[arguments[i]] = identity
+  return attrsIn(template)
+}
+
+export const attrsOf = o => attrs.apply(null, I.keys(o))
+
+export const object = lens => attrsInOr(lens, I.object0)
+
+export const pickIn = (process.env.NODE_ENV === 'production'
+  ? I.id
+  : fn => t => {
+      warn(
+        pickIn,
+        '`pickIn` has been obsoleted.  Consider using `attrsIn` instead.  See CHANGELOG for details.'
+      )
+      return fn(t)
+    })(t => (I.isObject(t) ? pick(modify(values, pickInAux, t)) : t))
 
 export const prop =
   process.env.NODE_ENV === 'production'
@@ -1720,14 +1806,31 @@ export const prop =
         return x
       }
 
-export function props() {
+export const props = (process.env.NODE_ENV === 'production'
+  ? I.id
+  : fn =>
+      function() {
+        warn(
+          props,
+          '`props` has been obsoleted.  Consider using `attrs` instead.  See CHANGELOG for details.'
+        )
+        return fn.apply(null, arguments)
+      })(function() {
   const n = arguments.length
   const template = {}
   for (let i = 0, k; i < n; ++i) template[(k = arguments[i])] = k
   return pick(template)
-}
+})
 
-export const propsOf = o => props.apply(null, I.keys(o))
+export const propsOf = (process.env.NODE_ENV === 'production'
+  ? I.id
+  : fn => t => {
+      warn(
+        propsOf,
+        '`propsOf` has been obsoleted.  Consider using `attrsOf` instead.  See CHANGELOG for details.'
+      )
+      return fn(t)
+    })(o => props.apply(null, I.keys(o)))
 
 export function removable(...ps) {
   function drop(y) {
