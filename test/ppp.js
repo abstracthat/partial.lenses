@@ -29,16 +29,16 @@ export const of = value => L.mapping(input => [input, [value, input]])
 
 export const isomap = R.curry((iso, ppp) => [ppp, L.cross([iso, []])])
 
-const empty = of([])
+const nil = of(null)
 
-const append = piso => [
+const cons = piso => [
   L.cross([[], piso]),
-  L.mapping((xs, y, s) => [[xs, [y, s]], [[...xs, y], s]])
+  L.mapping((xs, y, s) => [[xs, [y, s]], [[y, xs], s]])
 ]
 
-export const sequence = (...pisos) => [empty, pisos.map(append)]
+export const sequence = (...pisos) => [nil, isomap(L.uncons, pisos.map(cons))]
 
-export const many = piso => [empty, L.iterate(append(piso))]
+export const many = L.unfold
 
 export const alternatives = L.alternatives
 
